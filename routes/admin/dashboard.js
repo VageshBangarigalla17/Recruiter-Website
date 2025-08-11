@@ -8,6 +8,7 @@ const { isAdmin } = require('../../middlewares/adminMiddleware');
 // Models
 const User = require('../../models/User');
 const Candidate = require('../../models/Candidate');
+const Job = require('../../models/Job'); // <-- Add this if not already imported
 
 /**
  * Main Admin Dashboard
@@ -18,10 +19,14 @@ router.get('/', ensureAuthenticated, isAdmin, async (req, res, next) => {
     const totalCandidates = await Candidate.countDocuments();
     const totalRecruiters = await User.countDocuments({ role: 'recruiter' });
 
+    // Count open positions
+    const openPositions = await Job.countDocuments({ status: 'open' });
+
     res.render('admin/dashboard', {
       recruiters,
       totalCandidates,
       totalRecruiters,
+      openPositions,
       user: req.user
     });
   } catch (err) {
@@ -36,8 +41,9 @@ router.get('/data', ensureAuthenticated, isAdmin, async (req, res) => {
   try {
     const totalCandidates = await Candidate.countDocuments();
     const totalRecruiters = await User.countDocuments({ role: 'recruiter' });
+    const openPositions = await Job.countDocuments({ status: 'open' });
 
-    res.json({ totalCandidates, totalRecruiters });
+    res.json({ totalCandidates, totalRecruiters, openPositions });
   } catch (err) {
     console.error('Error fetching admin dashboard data:', err);
     res.status(500).json({ error: 'Server error' });
