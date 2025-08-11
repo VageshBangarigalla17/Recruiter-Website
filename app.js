@@ -148,19 +148,20 @@ app.get('/', (req, res) => {
   res.render('home');
 });
 
-// Dashboard page (FIXED with totalCandidates and totalRecruiters)
+// Dashboard page (FIXED: send totalCandidates & totalRecruiters)
 app.get('/dashboard', ensureAuthenticated, async (req, res, next) => {
   try {
-    const totalCandidates = Candidate ? await Candidate.countDocuments() : 0;
-    const totalRecruiters = User ? await User.countDocuments({ role: 'recruiter' }) : 0;
     const recruiters = User
       ? await User.find({ role: 'recruiter' }, '_id username').lean()
       : [];
 
+    const totalCandidates = Candidate ? await Candidate.countDocuments() : 0;
+    const totalRecruiters = User ? await User.countDocuments({ role: 'recruiter' }) : 0;
+
     res.render('admin/dashboard', {
+      recruiters,
       totalCandidates,
       totalRecruiters,
-      recruiters,
       user: req.user
     });
   } catch (err) {
