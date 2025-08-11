@@ -12,11 +12,10 @@ const flash = require('connect-flash');
 const http = require('http');
 const { Server } = require('socket.io');
 
-// Helper to safely require files
 const safeRequire = (filePath) => {
   try {
     return require(filePath);
-  } catch (err) {
+  } catch {
     return null;
   }
 };
@@ -57,7 +56,7 @@ if (typeof passportSetup === 'function') {
 const User = safeRequire(path.join(__dirname, 'models', 'User'));
 const Candidate = safeRequire(path.join(__dirname, 'models', 'Candidate'));
 
-// App init
+// Init app
 const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -76,12 +75,14 @@ if (!mongoUri) {
   process.exit(1);
 }
 
-app.use(session({
-  secret: process.env.SESSION_SECRET || 'hrms_secret',
-  resave: false,
-  saveUninitialized: false,
-  store: MongoStore.create({ mongoUrl: mongoUri })
-}));
+app.use(
+  session({
+    secret: process.env.SESSION_SECRET || 'hrms_secret',
+    resave: false,
+    saveUninitialized: false,
+    store: MongoStore.create({ mongoUrl: mongoUri }),
+  })
+);
 
 app.use(flash());
 app.use((req, res, next) => {
@@ -90,7 +91,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// Passport middleware
+// Passport
 app.use(passport.initialize());
 app.use(passport.session());
 
@@ -117,38 +118,48 @@ app.use(async (req, res, next) => {
 // Auth middleware
 const { ensureAuthenticated } =
   safeRequire(path.join(__dirname, 'middlewares', 'authMiddleware')) || {
-    ensureAuthenticated: (req, res, next) => next()
+    ensureAuthenticated: (req, res, next) => next(),
   };
 
-// Route loader
+// Helper to mount routes
 const safeUse = (mount, relPath) => {
   const mod = safeRequire(path.join(__dirname, relPath));
   if (mod) {
     app.use(mount, mod);
+    console.log(`✅ Route loaded: ${mount} -> ${relPath}.js`);
   } else {
-    console.warn(`Route ${mount} not found (${relPath}.js missing)`);
+    console.warn(`⚠️ Route not found: ${mount} (missing ${relPath}.js)`);
   }
 };
 
 // Routes
 safeUse('/', 'routes/auth');
 
+// Home page
 app.get('/', (req, res) => {
-  if ((req.isAuthenticated && req.isAuthenticated()) || (req.session && req.session.user)) {
+  if (
+    (req.isAuthenticated && req.isAuthenticated()) ||
+    (req.session && req.session.user)
+  ) {
     return res.redirect('/dashboard');
   }
   res.render('home');
 });
 
+// Dashboard page
 app.get('/dashboard', ensureAuthenticated, async (req, res, next) => {
   try {
-    const recruiters = User ? await User.find({ role: 'recruiter' }, '_id username').lean() : [];
-    res.render('dashboard', { recruiters, user: req.user });
+    const recruiters = User
+      ? await User.find({ role: 'recruiter' }, '_id username').lean()
+      : [];
+    // ✅ ensure path matches your folder structure
+    res.render('admin/dashboard', { recruiters, user: req.user });
   } catch (err) {
     next(err);
   }
 });
 
+// Dashboard stats API
 app.get('/api/dashboard-stats', ensureAuthenticated, async (req, res) => {
   try {
     const { recruiterId, date } = req.query;
@@ -160,28 +171,36 @@ app.get('/api/dashboard-stats', ensureAuthenticated, async (req, res) => {
     filter.createdAt = { $gte: start, $lte: end };
     if (recruiterId) filter.createdBy = recruiterId;
 
-    const totalCalls = Candidate ? await Candidate.countDocuments(filter) : 0;
-    const totalSelected = Candidate ? await Candidate.countDocuments({ ...filter, hrStatus: 'Select' }) : 0;
+    const totalCalls = Candidate
+      ? await Candidate.countDocuments(filter)
+      : 0;
+    const totalSelected = Candidate
+      ? await Candidate.countDocuments({ ...filter, hrStatus: 'Select' })
+      : 0;
 
-    const recruiterCalls = Candidate ? await Candidate.aggregate([
-      { $match: filter },
-      { $group: { _id: '$createdBy', calls: { $sum: 1 } } },
-      {
-        $lookup: {
-          from: 'users',
-          localField: '_id',
-          foreignField: '_id',
-          as: 'recruiter'
-        }
-      },
-      { $unwind: { path: '$recruiter', preserveNullAndEmptyArrays: true } }
-    ]) : [];
+    const recruiterCalls = Candidate
+      ? await Candidate.aggregate([
+          { $match: filter },
+          { $group: { _id: '$createdBy', calls: { $sum: 1 } } },
+          {
+            $lookup: {
+              from: 'users',
+              localField: '_id',
+              foreignField: '_id',
+              as: 'recruiter',
+            },
+          },
+          { $unwind: { path: '$recruiter', preserveNullAndEmptyArrays: true } },
+        ])
+      : [];
 
-    const clientCalls = Candidate ? await Candidate.aggregate([
-      { $match: filter },
-      { $group: { _id: '$client', calls: { $sum: 1 } } },
-      { $sort: { calls: -1 } }
-    ]) : [];
+    const clientCalls = Candidate
+      ? await Candidate.aggregate([
+          { $match: filter },
+          { $group: { _id: '$client', calls: { $sum: 1 } } },
+          { $sort: { calls: -1 } },
+        ])
+      : [];
 
     res.json({ totalCalls, totalSelected, recruiterCalls, clientCalls });
   } catch (err) {
@@ -190,19 +209,26 @@ app.get('/api/dashboard-stats', ensureAuthenticated, async (req, res) => {
   }
 });
 
-// Other routes
+// Mount route files
 safeUse('/admin/recruiters', 'routes/admin/recruiters');
 safeUse('/admin/dashboard', 'routes/admin/dashboard');
-safeUse('/candidates', 'routes/candidates');
+safeUse('/candidates', 'routes/candidates'); // must have backend/routes/candidates.js
 safeUse('/profile', 'routes/profile');
 safeUse('/recruiter', 'routes/recruiter/dashboard');
+
+// Optional: direct add candidate route (if no route file yet)
+app.get('/candidates/add', ensureAuthenticated, (req, res) => {
+  res.render('users/new'); // adjust if your add form is in a different location
+});
 
 // 404 handler
 app.use((req, res) => res.status(404).render('404'));
 
-// Socket.IO
+// Socket.IO setup
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: '*', methods: ['GET', 'POST'] } });
+const io = new Server(server, {
+  cors: { origin: '*', methods: ['GET', 'POST'] },
+});
 app.set('io', io);
 
 io.on('connection', (socket) => {
@@ -211,8 +237,14 @@ io.on('connection', (socket) => {
   socket.on('requestStats', async (filters) => {
     try {
       const { recruiterId, date } = filters || {};
-      const base = process.env.BASE_URL || `http://127.0.0.1:${process.env.PORT || 3000}`;
-      const resApi = await fetch(`${base}/api/dashboard-stats?recruiterId=${encodeURIComponent(recruiterId || '')}&date=${encodeURIComponent(date || '')}`);
+      const base =
+        process.env.BASE_URL ||
+        `http://127.0.0.1:${process.env.PORT || 3000}`;
+      const resApi = await fetch(
+        `${base}/api/dashboard-stats?recruiterId=${encodeURIComponent(
+          recruiterId || ''
+        )}&date=${encodeURIComponent(date || '')}`
+      );
       const data = await resApi.json();
       socket.emit('statsUpdate', data);
     } catch (err) {
@@ -220,7 +252,9 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('disconnect', () => console.log('Socket disconnected:', socket.id));
+  socket.on('disconnect', () =>
+    console.log('Socket disconnected:', socket.id)
+  );
 });
 
 // Start server
