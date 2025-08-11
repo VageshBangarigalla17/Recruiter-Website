@@ -12,6 +12,7 @@ const flash = require('connect-flash');
 const http = require('http');
 const { Server } = require('socket.io');
 
+// Helper: safe require
 const safeRequire = (filePath) => {
   try {
     return require(filePath);
@@ -20,19 +21,19 @@ const safeRequire = (filePath) => {
   }
 };
 
+// Path helper
 const configPath = (...parts) => path.join(__dirname, ...parts);
 
 // Optional Cloudinary
-let cloudinary = null;
 if (fs.existsSync(configPath('config', 'cloudinary.js'))) {
   try {
-    cloudinary = require(configPath('config', 'cloudinary'));
+    require(configPath('config', 'cloudinary'));
     console.log('Cloudinary config OK');
   } catch (err) {
     console.warn('Cloudinary load error:', err.message);
   }
 } else {
-  console.warn('Cloudinary config not found.');
+    console.warn('Cloudinary config not found.');
 }
 
 // Connect DB
@@ -69,8 +70,7 @@ app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 
 // Sessions
-const mongoUri = process.env.MONGO_URI;
-if (!mongoUri) {
+if (!process.env.MONGO_URI) {
   console.error('MONGO_URI not set in .env');
   process.exit(1);
 }
@@ -80,7 +80,7 @@ app.use(
     secret: process.env.SESSION_SECRET || 'hrms_secret',
     resave: false,
     saveUninitialized: false,
-    store: MongoStore.create({ mongoUrl: mongoUri }),
+    store: MongoStore.create({ mongoUrl: process.env.MONGO_URI }),
   })
 );
 
@@ -132,15 +132,17 @@ const safeUse = (mount, relPath) => {
   }
 };
 
-// Routes
+// ===== ROUTES =====
 safeUse('/', 'routes/auth');
+safeUse('/admin/recruiters', 'routes/admin/recruiters');
+safeUse('/admin/dashboard', 'routes/admin/dashboard');
+safeUse('/candidates', 'routes/candidates');
+safeUse('/profile', 'routes/profile');
+safeUse('/recruiter', 'routes/recruiter/dashboard');
 
 // Home page
 app.get('/', (req, res) => {
-  if (
-    (req.isAuthenticated && req.isAuthenticated()) ||
-    (req.session && req.session.user)
-  ) {
+  if ((req.isAuthenticated && req.isAuthenticated()) || (req.session && req.session.user)) {
     return res.redirect('/dashboard');
   }
   res.render('home');
@@ -152,7 +154,6 @@ app.get('/dashboard', ensureAuthenticated, async (req, res, next) => {
     const recruiters = User
       ? await User.find({ role: 'recruiter' }, '_id username').lean()
       : [];
-    // ✅ ensure path matches your folder structure
     res.render('admin/dashboard', { recruiters, user: req.user });
   } catch (err) {
     next(err);
@@ -171,9 +172,7 @@ app.get('/api/dashboard-stats', ensureAuthenticated, async (req, res) => {
     filter.createdAt = { $gte: start, $lte: end };
     if (recruiterId) filter.createdBy = recruiterId;
 
-    const totalCalls = Candidate
-      ? await Candidate.countDocuments(filter)
-      : 0;
+    const totalCalls = Candidate ? await Candidate.countDocuments(filter) : 0;
     const totalSelected = Candidate
       ? await Candidate.countDocuments({ ...filter, hrStatus: 'Select' })
       : 0;
@@ -209,22 +208,10 @@ app.get('/api/dashboard-stats', ensureAuthenticated, async (req, res) => {
   }
 });
 
-// Mount route files
-safeUse('/admin/recruiters', 'routes/admin/recruiters');
-safeUse('/admin/dashboard', 'routes/admin/dashboard');
-safeUse('/candidates', 'routes/candidates'); // must have backend/routes/candidates.js
-safeUse('/profile', 'routes/profile');
-safeUse('/recruiter', 'routes/recruiter/dashboard');
-
-// Optional: direct add candidate route (if no route file yet)
-app.get('/candidates/add', ensureAuthenticated, (req, res) => {
-  res.render('users/new'); // adjust if your add form is in a different location
-});
-
 // 404 handler
 app.use((req, res) => res.status(404).render('404'));
 
-// Socket.IO setup
+// ===== SOCKET.IO =====
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: { origin: '*', methods: ['GET', 'POST'] },
@@ -238,12 +225,9 @@ io.on('connection', (socket) => {
     try {
       const { recruiterId, date } = filters || {};
       const base =
-        process.env.BASE_URL ||
-        `http://127.0.0.1:${process.env.PORT || 3000}`;
+        process.env.BASE_URL || `http://127.0.0.1:${process.env.PORT || 3000}`;
       const resApi = await fetch(
-        `${base}/api/dashboard-stats?recruiterId=${encodeURIComponent(
-          recruiterId || ''
-        )}&date=${encodeURIComponent(date || '')}`
+        `${base}/api/dashboard-stats?recruiterId=${encodeURIComponent(recruiterId || '')}&date=${encodeURIComponent(date || '')}`
       );
       const data = await resApi.json();
       socket.emit('statsUpdate', data);
@@ -252,9 +236,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('disconnect', () =>
-    console.log('Socket disconnected:', socket.id)
-  );
+  socket.on('disconnect', () => console.log('Socket disconnected:', socket.id));
 });
 
 // Start server
