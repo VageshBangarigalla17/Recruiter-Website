@@ -1,8 +1,20 @@
 // backend/app.js
 
-require('dotenv').config();
-const cloudinary = require('./config/cloudinary');
-console.log('Cloudinary config OK?', cloudinary.config().cloud_name);
+require('dotenv').config(); // load env early
+
+// --- cloudinary (safe require) ---
+let cloudinary;
+try {
+  cloudinary = require('./config/cloudinary');
+  // try to read a config value (may be empty string if env missing)
+  const cloudName = (cloudinary && typeof cloudinary.config === 'function')
+    ? (cloudinary.config().cloud_name || '(not-set)')
+    : '(no-config-fn)';
+  console.log('Cloudinary config OK? ', cloudName);
+} catch (err) {
+  console.warn('Warning: ./config/cloudinary not found or failed to load. Continuing without cloudinary.', err && err.message);
+  cloudinary = null;
+}
 
 const express        = require('express');
 const path           = require('path');
@@ -57,7 +69,7 @@ app.use(passport.session());
 
 // ─── Make `user` Available in ALL Views ────────────────────────────────────
 app.use(async (req, res, next) => {
-  if (req.isAuthenticated()) {
+  if (req.isAuthenticated && req.isAuthenticated()) {
     res.locals.user = req.user;
   } else if (req.session?.user?.id) {
     try {
@@ -82,7 +94,7 @@ app.use('/', require('./routes/auth'));
 
 // ─── Landing Page ──────────────────────────────────────────────────────────
 app.get('/', (req, res) => {
-  if (req.isAuthenticated() || (req.session && req.session.user)) {
+  if ((req.isAuthenticated && req.isAuthenticated()) || (req.session && req.session.user)) {
     return res.redirect('/dashboard');
   }
   res.render('home');
@@ -182,7 +194,10 @@ io.on('connection', (socket) => {
   socket.on('requestStats', async (filters) => {
     try {
       const { recruiterId, date } = filters;
-      const resApi = await fetch(`http://localhost:${PORT}/api/dashboard-stats?recruiterId=${recruiterId || ''}&date=${date || ''}`);
+      // Use process.env.PORT when deployed; for socket-driven fetch within same host, it's better to call relative path.
+      const hostPort = process.env.PORT || PORT;
+      // attempt to call deployed endpoint via full URL only in development—on Render this should be replaced with internal logic.
+      const resApi = await fetch(`http://localhost:${hostPort}/api/dashboard-stats?recruiterId=${recruiterId || ''}&date=${date || ''}`);
       const data = await resApi.json();
       socket.emit('statsUpdate', data);
     } catch (err) {
@@ -197,7 +212,7 @@ io.on('connection', (socket) => {
 
 // ─── Start Server ──────────────────────────────────────────────────────────
 server.listen(PORT, () => {
-  console.log(`🚀 Server running on http://localhost:${PORT}`);
+  console.log(`🚀 Server running on port ${PORT}`);
 });
 
 module.exports = app;
