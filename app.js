@@ -33,7 +33,7 @@ if (fs.existsSync(configPath('config', 'cloudinary.js'))) {
     console.warn('Cloudinary load error:', err.message);
   }
 } else {
-    console.warn('Cloudinary config not found.');
+  console.warn('Cloudinary config not found.');
 }
 
 // Connect DB
@@ -148,13 +148,21 @@ app.get('/', (req, res) => {
   res.render('home');
 });
 
-// Dashboard page
+// Dashboard page (FIXED with totalCandidates and totalRecruiters)
 app.get('/dashboard', ensureAuthenticated, async (req, res, next) => {
   try {
+    const totalCandidates = Candidate ? await Candidate.countDocuments() : 0;
+    const totalRecruiters = User ? await User.countDocuments({ role: 'recruiter' }) : 0;
     const recruiters = User
       ? await User.find({ role: 'recruiter' }, '_id username').lean()
       : [];
-    res.render('admin/dashboard', { recruiters, user: req.user });
+
+    res.render('admin/dashboard', {
+      totalCandidates,
+      totalRecruiters,
+      recruiters,
+      user: req.user
+    });
   } catch (err) {
     next(err);
   }
